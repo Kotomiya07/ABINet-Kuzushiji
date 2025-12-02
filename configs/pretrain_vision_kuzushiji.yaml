@@ -1,0 +1,64 @@
+global:
+  name: pretrain-vision-kuzushiji
+  phase: train
+  stage: pretrain-vision
+  workdir: workdir
+  seed: ~
+ 
+dataset:
+  train: {
+    roots: ['data/kuzushiji_column_lmdb/train'],
+    batch_size: 64
+  }
+  test: {
+    roots: ['data/kuzushiji_column_lmdb/val'],
+    batch_size: 64
+  }
+  charset_path: data/kuzushiji_column_lmdb/charset_kuzushiji_column.txt
+  num_workers: 8
+  max_length: 40
+  image_height: 64
+  image_width: 192
+  case_sensitive: False
+  eval_case_sensitive: False
+  data_aug: True
+  multiscales: False
+  pin_memory: True
+  smooth_label: False
+  smooth_factor: 0.1
+  one_hot_y: True
+  use_sm: False
+
+training:
+  epochs: 10
+  show_iters: 50
+  eval_iters: 2000
+  save_iters: 2000
+
+optimizer:
+  type: Adam
+  true_wd: False
+  wd: 0.0
+  bn_wd: False
+  clip_grad: 20
+  lr: 0.0001
+  args: {
+    betas: !!python/tuple [0.9, 0.999],
+  }
+  scheduler: {
+    periods: [6, 4],
+    gamma: 0.1,
+  }
+
+model:
+  name: 'modules.model_vision.BaseVision'
+  checkpoint: ~
+  vision: {
+    loss_weight: 1.,
+    attention: 'position',
+    backbone: 'transformer',
+    backbone_ln: 3,
+    max_len: 1200,
+    feat_h: 16,
+    feat_w: 48,
+  }

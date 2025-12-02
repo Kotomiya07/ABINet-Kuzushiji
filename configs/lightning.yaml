@@ -1,0 +1,27 @@
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+# ベースとなる従来の設定ファイルパス
+config_path: train_abinet.yaml
+
+trainer:
+  accelerator: auto
+  devices: auto   # GPU があれば自動
+  strategy: null  # ここを上書きすることで ddp などを指定可能
+  precision: 32
+  log_every_n_steps: 50
+  max_epochs: null  # null の場合は元設定(training_epochs)を使用
+
+wandb:
+  enable: true
+  project: abinet
+  entity: null
+  run_name: null
+  mode: online   # offline / disabled も選択可
+  tags: []

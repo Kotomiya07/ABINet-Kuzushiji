@@ -1,0 +1,27 @@
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+# Hugging Faceデータセットを使用する事前学習用の設定ファイル
+config_path: configs/pretrain_language_model_huggingface.yaml
+
+trainer:
+  accelerator: auto
+  devices: auto
+  strategy: null  # 上書き可能にする
+  precision: 32
+  log_every_n_steps: 50
+  max_epochs: null  # null の場合は元設定(training_epochs)を使用
+
+wandb:
+  enable: true
+  project: abinet-kuzushiji-language
+  entity: null
+  run_name: null
+  mode: online
+  tags: []

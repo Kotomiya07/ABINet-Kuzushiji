@@ -1,0 +1,61 @@
+global:
+  name: pretrain-language-model-huggingface
+  phase: train
+  stage: pretrain-language
+  workdir: workdir
+  seed: ~
+ 
+dataset:
+  train: {
+    roots: ['data/WikiText-103.csv'],  # フォールバック用（Hugging Faceが使用できない場合）
+    batch_size: 4096
+  }
+  test: {
+    roots: ['data/WikiText-103_eval_d1.csv'],  # フォールバック用
+    batch_size: 4096
+  }
+  charset_path: data/kuzushiji_column_lmdb/charset_kuzushiji_column.txt  # 古文書データ用の文字セット
+  # Hugging Faceデータセットを使用する設定
+  huggingface_train: ['Kotomiya07/honkoku-hq', 'Kotomiya07/honkoku-v3.0']
+  huggingface_test: ['Kotomiya07/honkoku-hq', 'Kotomiya07/honkoku-v3.0']
+  huggingface_text_column: 'text'  # テキストが含まれるカラム名
+  huggingface_train_split: 'train'  # 訓練用のsplit名
+  huggingface_test_split: 'validation'  # 検証用のsplit名
+
+training:
+  epochs: 80
+  show_iters: 50
+  eval_iters: 6000
+  save_iters: 3000
+
+optimizer:
+  type: Adam  # 利用可能なoptimizer: Adam, AdamW, SGD, Adadelta, RMSprop, Adagrad, Adamax, ASGD, Rprop, RAdam, RAdamScheduleFree, AdamWScheduleFree など
+  true_wd: False
+  wd: 0.0
+  bn_wd: False
+  clip_grad: 20
+  lr: 0.0001
+  args: {
+    betas: !!python/tuple [0.9, 0.999], # for default Adam 
+    # 他のoptimizerの例:
+    # AdamW: weight_decay: 0.01
+    # SGD: momentum: 0.9, weight_decay: 0.0001
+    # Adadelta: rho: 0.9, eps: 1e-6
+    # RMSprop: alpha: 0.99, momentum: 0.0
+    # RAdamScheduleFree: betas: !!python/tuple [0.9, 0.999] (学習率スケジューラ不要、より大きな学習率が推奨)
+    # AdamWScheduleFree: betas: !!python/tuple [0.9, 0.999], weight_decay: 0.01 (学習率スケジューラ不要)
+  }
+  scheduler: {
+    periods: [70, 10],
+    gamma: 0.1,
+    # 注意: RAdamScheduleFree や AdamWScheduleFree を使用する場合、schedulerは無視されます
+  }
+
+model:
+  name: 'modules.model_language.BCNLanguage'
+  language: {
+    num_layers: 4,
+    loss_weight: 1.,
+    use_self_attn: False
+  }
+

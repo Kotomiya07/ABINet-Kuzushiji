@@ -1,0 +1,59 @@
+global:
+  name: pretrain-language-model-huggingface-schedulefree
+  phase: train
+  stage: pretrain-language
+  workdir: workdir
+  seed: ~
+ 
+dataset:
+  train: {
+    roots: ['data/WikiText-103.csv'],  # フォールバック用（Hugging Faceが使用できない場合）
+    batch_size: 512
+  }
+  test: {
+    roots: ['data/WikiText-103_eval_d1.csv'],  # フォールバック用
+    batch_size: 512
+  }
+  charset_path: data/kuzushiji_column_lmdb/charset_kuzushiji_column.txt  # 古文書データ用の文字セット
+  # Hugging Faceデータセットを使用する設定
+  huggingface_train: ['Kotomiya07/honkoku-hq', 'Kotomiya07/honkoku-v3.0']
+  huggingface_test: ['Kotomiya07/honkoku-hq', 'Kotomiya07/honkoku-v3.0']
+  # huggingface_train: ['Kotomiya07/honkoku-hq']
+  # huggingface_test: ['Kotomiya07/honkoku-hq']
+  huggingface_text_column: 'text'  # テキストが含まれるカラム名
+  huggingface_train_split: 'train'  # 訓練用のsplit名
+  huggingface_test_split: 'validation'  # 検証用のsplit名
+  prefetch_factor: 2    # GPU待ちを減らすため先読みを強化
+  channels_last: True   # Tensor Core 最適化（テンプレ継承の明示）
+
+training:
+  epochs: 80
+  show_iters: 50
+  eval_iters: 6000
+  save_iters: 3000
+
+optimizer:
+  type: RAdamScheduleFree  # schedulefreeのRAdamScheduleFreeを使用（学習率スケジューラ不要）
+  true_wd: False
+  wd: 0.0
+  bn_wd: False
+  clip_grad: 20
+  lr: 0.0001  # schedulefreeのoptimizerはより大きな学習率が推奨される場合があります
+  args: {
+    betas: !!python/tuple [0.9, 0.999],  # デフォルト値。長期間のトレーニングでは[0.95, 0.999]や[0.98, 0.999]も検討
+    # その他のパラメータ: eps=1e-8, weight_decay=0, r=0.0, weight_lr_power=2.0, foreach=True, silent_sgd_phase=True
+  }
+  scheduler: {
+    periods: [70, 10],  # RAdamScheduleFreeでは無視されます
+    gamma: 0.1,  # RAdamScheduleFreeでは無視されます
+  }
+
+model:
+  name: 'modules.model_language.BCNLanguage'
+  language_checkpoint: ckpt/pretrain-language-model.pth
+  language: {
+    num_layers: 4,
+    loss_weight: 1.,
+    use_self_attn: False
+  }
+

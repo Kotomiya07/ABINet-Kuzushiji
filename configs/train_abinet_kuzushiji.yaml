@@ -1,0 +1,107 @@
+global:
+  name: train-abinet-kuzushiji
+  phase: train
+  stage: train-super
+  workdir: workdir
+  seed: ~
+ 
+dataset:
+  train: {
+    roots: ['data/kuzushiji_column_lmdb/train'],
+    batch_size: 128
+  }
+  test: {
+    roots: ['data/kuzushiji_column_lmdb/val'],
+    batch_size: 128
+  }
+  charset_path: data/kuzushiji_column_lmdb/charset_kuzushiji_column.txt
+  num_workers: 8
+  max_length: 40
+  image_height: 64
+  image_width: 192
+  case_sensitive: False
+  eval_case_sensitive: False
+  data_aug: True
+  multiscales: False
+  pin_memory: True
+  smooth_label: False
+  smooth_factor: 0.1
+  one_hot_y: True
+  use_sm: False
+
+training:
+  epochs: 10
+  show_iters: 50
+  eval_iters: 2000
+  save_iters: 2000
+
+optimizer:
+  type: Adam
+  true_wd: False
+  wd: 0.0
+  bn_wd: False
+  clip_grad: 20
+  lr: 0.0001
+  args: {
+    betas: !!python/tuple [0.9, 0.999],
+  }
+  scheduler: {
+    periods: [6, 4],
+    gamma: 0.1,
+  }
+
+model:
+  name: 'modules.model_abinet_iter.ABINetIterModel'
+  iter_size: 3
+  ensemble: ''
+  use_vision: False
+  vision: {
+    checkpoint: workdir/pretrain-vision-model/best-pretrain-vision-model.pth,
+    loss_weight: 1.,
+    attention: 'position',
+    backbone: 'transformer',
+    backbone_ln: 3,
+    max_len: 1200,
+    feat_h: 16,
+    feat_w: 48,
+    enc_with_vision: False,
+    iter_size: 2,
+    mask: False,
+  }
+  language: {
+    checkpoint: ~,
+    detach: False,
+    loss_weight: 1.,
+  }
+  fusion: {
+    vision_loss_weight: 1.,
+    language_loss_weight: 1.,
+  }
+  transformer: {
+    enc_layer_num: 4,
+    dec_layer_num: 4,
+    d_model: 512,
+    d_feedforward: 2048,
+    nhead: 8,
+    dropout: 0.1,
+  }
+  model_eval: alignment
+  k: 5
+  eval_case_sensisitves: False
+  backbone: 'resnet45'
+  loss_weight: [1., 1.]
+
+augmentation:
+  color_jitter: [0.5, 0.5, 0.5, 0.5]
+  geometry: {
+    degrees: 45,
+    translate: [0.0, 0.0],
+    scale: [0.5, 2.],
+    shear: [45, 15],
+  }
+  deterioration: {
+    var: 20,
+    degrees: 6,
+    factor: 4,
+    p: 0.25,
+  }
