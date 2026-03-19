@@ -36,6 +36,10 @@ ABINet uses a vision model and an explicit language model to recognize text in t
   - 既存の設定は `config_path` で従来YAMLを読み込み、Hydra オーバーライドで `trainer.*` / `wandb.*` を上書きできます。
   - `wandb.mode` は `online` / `offline` / `disabled` を選択可。W&B を使わない場合は `wandb.enable=false`。
 - 学習と検証は Lightning の `Trainer` に統一されています。チェックポイントは `abinet-{epoch:02d}-{val_cwr:.4f}.ckpt` で保存されます。
+- Lightning 実行では `torch.compile` が既定で有効です。無効化する場合は `runtime.compile_enabled=false`。
+- Transformer 内の multi-head attention は PyTorch 2.x の SDPA を使用します。`runtime.attention_backend` で `auto` / `flash_only` / `math_only` を選べます。
+- FlashAttention カーネルを優先したい場合は mixed precision が必要です。例えば `trainer.precision=bf16-mixed` を指定してください。
+- decoder 側で `attn_mask` を使う経路では FlashAttention カーネルが使えない場合があります。そのため通常は `flash_only` ではなく `auto` の使用を推奨します。
 
 ### 実行例（くずし字 Kuzushiji）
 

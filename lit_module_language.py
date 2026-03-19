@@ -3,6 +3,7 @@ import torch
 import jiwer
 
 from losses import MultiLosses
+from runtime_utils import sdpa_context
 from utils import ifnone
 
 # schedulefreeのサポート（オプショナル）
@@ -91,7 +92,8 @@ class LanguageLightningModule(pl.LightningModule):
         tokens, target = batch  # tokens: [label_x, length_x], target: [label_y, length_y]
         tokens_x, lengths_x = tokens
         gt_labels, gt_lengths = target
-        outputs = self(tokens_x, lengths_x)
+        with sdpa_context(self.config):
+            outputs = self(tokens_x, lengths_x)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         self.log("train/loss", loss, on_step=True, prog_bar=True)
 
@@ -107,7 +109,8 @@ class LanguageLightningModule(pl.LightningModule):
         tokens, target = batch
         tokens_x, lengths_x = tokens
         gt_labels, gt_lengths = target
-        outputs = self(tokens_x, lengths_x)
+        with sdpa_context(self.config):
+            outputs = self(tokens_x, lengths_x)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         self.log("val/loss", loss, on_epoch=True, prog_bar=True, sync_dist=True)
 
@@ -123,7 +126,8 @@ class LanguageLightningModule(pl.LightningModule):
         tokens, target = batch
         tokens_x, lengths_x = tokens
         gt_labels, gt_lengths = target
-        outputs = self(tokens_x, lengths_x)
+        with sdpa_context(self.config):
+            outputs = self(tokens_x, lengths_x)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         self.log("test/loss", loss, on_epoch=True, prog_bar=True, sync_dist=True)
 

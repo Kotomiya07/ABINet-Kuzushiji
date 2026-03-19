@@ -3,13 +3,13 @@ import os
 import hydra
 from hydra import utils as hydra_utils
 import pytorch_lightning as pl
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
 from lit_datamodule import ABINetDataModule
 from lit_module import ABINetLightningModule, _load_model
 from lit_module_language import LanguageLightningModule
+from runtime_utils import apply_runtime_overrides, maybe_compile_module, warn_if_runtime_mismatch
 from utils import Config
 
 import torch.multiprocessing as mp
@@ -32,6 +32,7 @@ def main(cfg):
 
     # 従来のYAMLを読み込み（テンプレートも適用）
     base_config = Config(cfg.config_path)
+    apply_runtime_overrides(base_config, getattr(cfg, "runtime", None))
 
     # Hydra側からepochを上書き可能に
     if cfg.trainer.max_epochs is not None:
@@ -45,6 +46,7 @@ def main(cfg):
         model = LanguageLightningModule(base_config, _load_model(base_config))
     else:
         model = ABINetLightningModule(base_config)
+    model.model = maybe_compile_module(model.model, base_config)
 
     # 監視メトリクスはステージごとに切り替える
     if base_config.global_stage == "pretrain-language":
@@ -87,6 +89,7 @@ def main(cfg):
         callbacks=callbacks,
         logger=wandb_logger,
     )
+    warn_if_runtime_mismatch(cfg.trainer, base_config)
 
     trainer.fit(model, datamodule=datamodule)
 

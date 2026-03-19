@@ -19,6 +19,14 @@ trainer:
   num_sanity_val_steps: 0
   max_epochs: null  # null の場合は元設定(training_epochs)を使用
 
+runtime:
+  attention_backend: auto
+  compile_enabled: true
+  compile_backend: inductor
+  compile_mode: reduce-overhead
+  compile_fullgraph: false
+  compile_dynamic: false
+
 wandb:
   enable: true
   project: abinet-kuzushiji-vision

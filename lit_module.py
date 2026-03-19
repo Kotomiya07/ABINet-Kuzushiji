@@ -7,6 +7,7 @@ import torch
 from torch.optim import lr_scheduler
 
 from losses import MultiLosses
+from runtime_utils import sdpa_context
 from utils import CharsetMapper, ifnone
 
 # schedulefreeのサポート（オプショナル）
@@ -89,7 +90,8 @@ class ABINetLightningModule(pl.LightningModule):
         if getattr(self.config, 'dataset_channels_last', False):
             images = images.to(memory_format=torch.channels_last)
         gt_labels, gt_lengths = target
-        outputs = self(images)
+        with sdpa_context(self.config):
+            outputs = self(images)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         self.log("train/loss", loss, on_step=True, prog_bar=True)
 
@@ -106,7 +108,8 @@ class ABINetLightningModule(pl.LightningModule):
         if getattr(self.config, 'dataset_channels_last', False):
             images = images.to(memory_format=torch.channels_last)
         gt_labels, gt_lengths = target
-        outputs = self(images)
+        with sdpa_context(self.config):
+            outputs = self(images)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         ccr, cwr = self._word_accuracy(outputs, gt_labels, gt_lengths)
         self.log("val/loss", loss, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -119,7 +122,8 @@ class ABINetLightningModule(pl.LightningModule):
         if getattr(self.config, 'dataset_channels_last', False):
             images = images.to(memory_format=torch.channels_last)
         gt_labels, gt_lengths = target
-        outputs = self(images)
+        with sdpa_context(self.config):
+            outputs = self(images)
         loss = self.criterion(outputs, gt_labels, gt_lengths)
         ccr, cwr = self._word_accuracy(outputs, gt_labels, gt_lengths)
         self.log("test/loss", loss, on_epoch=True, prog_bar=True, sync_dist=True)

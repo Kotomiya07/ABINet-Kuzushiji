@@ -12,6 +12,48 @@ from torch.nn import functional as F
 from torch.nn.init import constant_, xavier_uniform_
 
 
+def _build_sdpa_mask(attn_mask, key_padding_mask, bsz, num_heads, tgt_len, src_len, dtype, device):
+    mask = None
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.uint8:
+            attn_mask = attn_mask.to(torch.bool)
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
+        elif attn_mask.dim() == 3:
+            if attn_mask.size(0) == bsz * num_heads:
+                attn_mask = attn_mask.view(bsz, num_heads, tgt_len, src_len)
+            elif attn_mask.size(0) == bsz:
+                attn_mask = attn_mask.unsqueeze(1)
+            elif attn_mask.size(0) == 1:
+                attn_mask = attn_mask.unsqueeze(0)
+            else:
+                raise RuntimeError(
+                    f"3D attn_mask first dim {attn_mask.size(0)} is not compatible with "
+                    f"batch={bsz} heads={num_heads}"
+                )
+        else:
+            raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
+
+        if attn_mask.dtype == torch.bool:
+            mask = torch.zeros((bsz, num_heads, tgt_len, src_len), dtype=dtype, device=device)
+            mask = mask.masked_fill(attn_mask, float("-inf"))
+        else:
+            mask = attn_mask.to(device=device, dtype=dtype)
+            if mask.size(0) == 1:
+                mask = mask.expand(bsz, num_heads, tgt_len, src_len)
+
+    if key_padding_mask is not None:
+        if key_padding_mask.dtype == torch.uint8:
+            key_padding_mask = key_padding_mask.to(torch.bool)
+        key_padding_mask = key_padding_mask.to(device=device)
+        key_mask = torch.zeros((bsz, 1, 1, src_len), dtype=dtype, device=device)
+        key_mask = key_mask.masked_fill(key_padding_mask.unsqueeze(1).unsqueeze(2), float("-inf"))
+        mask = key_mask if mask is None else mask + key_mask
+
+    return mask
+
+
 def multi_head_attention_forward(query,                           # type: Tensor
                                  key,                             # type: Tensor
                                  value,                           # type: Tensor
@@ -261,6 +303,32 @@ def multi_head_attention_forward(query,                           # type: Tensor
             attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
+
+    if not need_weights and hasattr(F, "scaled_dot_product_attention"):
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+        sdpa_mask = _build_sdpa_mask(
+            attn_mask,
+            key_padding_mask,
+            bsz,
+            num_heads,
+            tgt_len,
+            src_len,
+            q.dtype,
+            q.device,
+        )
+        attn_output = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=sdpa_mask,
+            dropout_p=dropout_p if training else 0.0,
+            is_causal=False,
+        )
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(tgt_len, bsz, embed_dim)
+        attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
+        return attn_output, None
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
@@ -732,7 +800,7 @@ class TransformerEncoderLayer(Module):
             see the docs in Transformer class.
         """
         src2, attn = self.self_attn(src, src, src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)
+                              key_padding_mask=src_key_padding_mask, need_weights=self.debug)
         if self.debug: self.attn = attn
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -813,17 +881,17 @@ class TransformerDecoderLayer(Module):
         """
         if self.has_self_attn:
             tgt2, attn = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
-                                key_padding_mask=tgt_key_padding_mask)
+                                key_padding_mask=tgt_key_padding_mask, need_weights=self.debug)
             tgt = tgt + self.dropout1(tgt2)
             tgt = self.norm1(tgt)
             if self.debug: self.attn = attn
         tgt2, attn2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)
+                                   key_padding_mask=memory_key_padding_mask, need_weights=self.debug)
         if self.debug: self.attn2 = attn2
 
         if self.siamese:
             tgt3, attn3 = self.multihead_attn2(tgt, memory2, memory2, attn_mask=memory_mask2,
-                            key_padding_mask=memory_key_padding_mask2)
+                            key_padding_mask=memory_key_padding_mask2, need_weights=self.debug)
             tgt = tgt + self.dropout2(tgt3)
             if self.debug: self.attn3 = attn3
 
