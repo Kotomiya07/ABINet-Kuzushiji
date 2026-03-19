@@ -1,0 +1,82 @@
+global:
+  name: pretrain-vision-japanese-classical-64x256
+  phase: train
+  stage: pretrain-vision
+  workdir: workdir
+  seed: ~
+
+dataset:
+  train: {
+    roots: ['data/japanese_classical_column_lmdb/train'],
+    batch_size: 64
+  }
+  test: {
+    roots: ['data/japanese_classical_column_lmdb/val'],
+    batch_size: 64
+  }
+  charset_path: data/japanese_classical_column_lmdb/charset_japanese_classical_column.txt
+  num_workers: 8
+  max_length: 40
+  image_height: 64
+  image_width: 256
+  case_sensitive: False
+  eval_case_sensitive: False
+  data_aug: True
+  multiscales: False
+  pin_memory: True
+  smooth_label: False
+  smooth_factor: 0.1
+  one_hot_y: True
+  use_sm: False
+
+training:
+  epochs: 10
+  show_iters: 50
+  eval_iters: 2000
+  save_iters: 2000
+
+optimizer:
+  type: Adam
+  true_wd: False
+  wd: 0.0
+  bn_wd: False
+  clip_grad: 20
+  lr: 0.0001
+  args: {
+    betas: !!python/tuple [0.9, 0.999],
+  }
+  scheduler: {
+    periods: [6, 4],
+    gamma: 0.1,
+  }
+
+model:
+  name: 'modules.model_vision.BaseVision'
+  checkpoint: ~
+  vision: {
+    loss_weight: 1.,
+    attention: 'position',
+    backbone: 'transformer',
+    backbone_ln: 3,
+    max_len: 1600,
+    feat_h: 16,
+    feat_w: 64,
+  }
+
+augmentation:
+  color_jitter: [0.15, 0.15, 0.0, 0.0]
+  color_jitter_p: 0.1
+  geometry: {
+    degrees: 5,
+    translate: [0.0, 0.0],
+    scale: [0.9, 1.1],
+    shear: [3, 1],
+  }
+  geometry_distortion: 0.1
+  geometry_p: 0.15
+  deterioration: {
+    var: 8,
+    degrees: 3,
+    factor: 2,
+    p: 0.1,
+  }

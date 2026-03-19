@@ -139,6 +139,14 @@ datasets
      trainer.max_epochs=10 \
      wandb.enable=false
    ```
+   縦長列に合わせて横幅を広げた比較用設定:
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning_vision \
+     config_path=configs/pretrain_vision_japanese_classical_64x256.yaml \
+     trainer.max_epochs=10 \
+     wandb.enable=false
+   ```
 3. Language 事前学習用 TSV を生成  
    ```
    uv run python tools/create_language_corpus_from_lmdb.py \
@@ -161,6 +169,14 @@ datasets
    uv run python train_lightning.py \
      --config-name lightning \
      config_path=configs/train_abinet_japanese_classical.yaml \
+     trainer.max_epochs=10 \
+     wandb.enable=false
+   ```
+   `64x256` 設定を使う場合:
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning \
+     config_path=configs/train_abinet_japanese_classical_64x256.yaml \
      trainer.max_epochs=10 \
      wandb.enable=false
    ```
