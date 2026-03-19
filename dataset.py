@@ -45,6 +45,12 @@ class ImageDataset(Dataset):
         readahead: bool = True,
         return_idx: bool = False,
         return_raw: bool = False,
+        augmentation_color_jitter=None,
+        augmentation_color_jitter_p: float = 0.25,
+        augmentation_geometry=None,
+        augmentation_geometry_distortion: float = 0.5,
+        augmentation_geometry_p: float = 0.5,
+        augmentation_deterioration=None,
         **kwargs,
     ):
         self.path, self.name = Path(path), Path(path).name
@@ -59,25 +65,73 @@ class ImageDataset(Dataset):
         self.character = self.charset.label_to_char.values()
         self.c = self.charset.num_classes
         self.readahead = readahead
+        self.env = None
 
-        # readahead=True でOSの先読みを利用し、シーケンシャル読み込みを高速化
-        self.env = lmdb.open(str(path), readonly=True, lock=False, readahead=self.readahead, meminit=False)
-        assert self.env, f"Cannot open LMDB dataset from {path}."
-        with self.env.begin(write=False) as txn:
+        # 長さだけ先に読んでおき、LMDB本体は worker プロセス側で遅延オープンする
+        with lmdb.open(str(path), readonly=True, lock=False, readahead=False, meminit=False).begin(write=False) as txn:
             self.length = int(txn.get("num-samples".encode()))
 
         if self.is_training and self.data_aug:
+            color_jitter = augmentation_color_jitter or [0.5, 0.5, 0.5, 0.1]
+            geometry = augmentation_geometry or {
+                "degrees": 45,
+                "translate": [0.0, 0.0],
+                "scale": [0.5, 2.0],
+                "shear": [45, 15],
+            }
+            deterioration = augmentation_deterioration or {
+                "var": 20,
+                "degrees": 6,
+                "factor": 4,
+                "p": 0.25,
+            }
             self.augment_tfs = transforms.Compose(
                 [
-                    CVGeometry(degrees=45, translate=(0.0, 0.0), scale=(0.5, 2.0), shear=(45, 15), distortion=0.5, p=0.5),
-                    CVDeterioration(var=20, degrees=6, factor=4, p=0.25),
-                    CVColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.1, p=0.25),
+                    CVGeometry(
+                        degrees=geometry.get("degrees", 45),
+                        translate=tuple(geometry.get("translate", [0.0, 0.0])),
+                        scale=tuple(geometry.get("scale", [0.5, 2.0])),
+                        shear=tuple(geometry.get("shear", [45, 15])),
+                        distortion=augmentation_geometry_distortion,
+                        p=augmentation_geometry_p,
+                    ),
+                    CVDeterioration(
+                        var=deterioration.get("var", 20),
+                        degrees=deterioration.get("degrees", 6),
+                        factor=deterioration.get("factor", 4),
+                        p=deterioration.get("p", 0.25),
+                    ),
+                    CVColorJitter(
+                        brightness=color_jitter[0],
+                        contrast=color_jitter[1],
+                        saturation=color_jitter[2],
+                        hue=color_jitter[3],
+                        p=augmentation_color_jitter_p,
+                    ),
                 ]
             )
         self.totensor = transforms.ToTensor()
 
     def __len__(self):
         return self.length
+
+    def _ensure_env(self):
+        if self.env is None:
+            # fork 後に親プロセスの LMDB ハンドルを共有すると worker が落ちやすいため、各 worker で開き直す
+            self.env = lmdb.open(
+                str(self.path),
+                readonly=True,
+                lock=False,
+                readahead=self.readahead,
+                meminit=False,
+            )
+            assert self.env, f"Cannot open LMDB dataset from {self.path}."
+        return self.env
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["env"] = None
+        return state
 
     def _next_image(self, index):
         next_index = random.randint(0, len(self) - 1)
@@ -123,7 +177,8 @@ class ImageDataset(Dataset):
             return cv2.resize(img, (self.img_w, self.img_h))
 
     def get(self, idx):
-        with self.env.begin(write=False) as txn:
+        env = self._ensure_env()
+        with env.begin(write=False) as txn:
             image_key, label_key = f"image-{idx + 1:09d}", f"label-{idx + 1:09d}"
             try:
                 label = str(txn.get(label_key.encode()), "utf-8")

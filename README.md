@@ -90,6 +90,81 @@ ABINet uses a vision model and an explicit language model to recognize text in t
      wandb.enable=true wandb.project=abinet-kuzushiji
    ```
 
+### 実行例（`datasets` の NDL-MinHon OCR Dataset）
+
+このリポジトリでは、`datasets` が NDL-MinHon OCR Dataset に向いていれば、そのまま ABINet 学習用 LMDB に変換できます。
+
+対応するデータ構成:
+```
+datasets
+├── v2/<corpus>/<doc_id>/<page>.json
+├── img_v2/<corpus>/<doc_id>/<page>.jpg
+├── v1/<doc_id>/<page>.json
+└── img_v1/<doc_id>/<page>.jpg
+```
+
+- `v2` は `words[*].boundingBox` と `words[*].text` を利用
+- `v1` は JSON 配列の各要素の `boundingBox` と `text` を利用
+- `isTextline=true` の要素だけを使い、bbox でページ画像から列領域をクロップ
+- `train/val/test` split が無いので、文書単位で `train/val/test` に自動分割
+- 画像が欠けているページは自動でスキップ
+
+必要なら従来の `train/images + labels.*` 形式も引き続きサポートしています。
+
+1. LMDB と charset を生成  
+   ```
+   uv run python tools/build_classical_column_lmdb.py \
+     --dataset-root datasets \
+     --output-root data/japanese_classical_column_lmdb \
+     --source-format auto \
+     --max-length 40 \
+     --val-ratio 0.1 \
+     --test-ratio 0.1 \
+     --margin 4 \
+     --num-workers 8
+   ```
+   `v2` の特定コーパスだけ使う場合:
+   ```
+   uv run python tools/build_classical_column_lmdb.py \
+     --dataset-root datasets \
+     --source-format ndl-minhon-v2 \
+     --corpora tempo kamosha ibarakiuniv \
+     --output-root data/japanese_classical_column_lmdb
+   ```
+2. Vision 事前学習  
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning_vision \
+     config_path=configs/pretrain_vision_japanese_classical.yaml \
+     trainer.max_epochs=10 \
+     wandb.enable=false
+   ```
+3. Language 事前学習用 TSV を生成  
+   ```
+   uv run python tools/create_language_corpus_from_lmdb.py \
+     --train-lmdb data/japanese_classical_column_lmdb/train \
+     --val-lmdb data/japanese_classical_column_lmdb/val \
+     --output-train data/japanese_classical_language_train.tsv \
+     --output-val data/japanese_classical_language_val.tsv \
+     --dedupe
+   ```
+4. Language 事前学習  
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning_language \
+     config_path=configs/pretrain_language_model_japanese_classical.yaml \
+     trainer.max_epochs=40 \
+     wandb.enable=false
+   ```
+5. ABINet 本学習  
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning \
+     config_path=configs/train_abinet_japanese_classical.yaml \
+     trainer.max_epochs=10 \
+     wandb.enable=false
+   ```
+
 ## Datasets
 
 - Training datasets

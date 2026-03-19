@@ -67,6 +67,12 @@ class ABINetDataModule(pl.LightningDataModule):
                 multiscales=self.config.dataset_multiscales,
                 one_hot_y=self.config.dataset_one_hot_y,
                 readahead=self.config.dataset_readahead,
+                augmentation_color_jitter=self.config.augmentation_color_jitter,
+                augmentation_color_jitter_p=self.config.augmentation_color_jitter_p,
+                augmentation_geometry=self.config.augmentation_geometry,
+                augmentation_geometry_distortion=self.config.augmentation_geometry_distortion,
+                augmentation_geometry_p=self.config.augmentation_geometry_p,
+                augmentation_deterioration=self.config.augmentation_deterioration,
             )
             train_list = [ImageDataset(p, is_training=True, **common_kwargs) for p in self.config.dataset_train_roots]
             val_list = [ImageDataset(p, is_training=False, **common_kwargs) for p in self.config.dataset_test_roots]

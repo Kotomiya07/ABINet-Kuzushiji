@@ -15,6 +15,8 @@ trainer:
   devices: auto
   precision: 32
   log_every_n_steps: 50
+  val_check_interval: 1000
+  num_sanity_val_steps: 0
   max_epochs: null  # null の場合は元設定(training_epochs)を使用
 
 wandb:

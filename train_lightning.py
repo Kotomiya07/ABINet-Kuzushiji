@@ -82,6 +82,8 @@ def main(cfg):
         max_epochs=base_config.training_epochs,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         gradient_clip_val=base_config.optimizer_clip_grad,
+        val_check_interval=getattr(cfg.trainer, "val_check_interval", 1.0),
+        num_sanity_val_steps=getattr(cfg.trainer, "num_sanity_val_steps", 2),
         callbacks=callbacks,
         logger=wandb_logger,
     )

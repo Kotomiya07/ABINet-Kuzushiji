@@ -172,4 +172,5 @@ wandb/
 ckpt/
 abinet-kuzushiji-language/
 abinet-kuzushiji-vision/
+lightning_logs/
 datasets
