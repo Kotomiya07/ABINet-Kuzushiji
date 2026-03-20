@@ -1,7 +1,10 @@
 import logging
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 
 import torch
+
+_CURRENT_ATTENTION_BACKEND = ContextVar("current_attention_backend", default="auto")
 
 
 def apply_runtime_overrides(base_config, runtime_cfg):
@@ -72,6 +75,10 @@ def _resolve_sdpa_backends(backend_name):
     raise ValueError(f"Unsupported attention backend: {backend_name}")
 
 
+def get_runtime_attention_backend():
+    return _CURRENT_ATTENTION_BACKEND.get()
+
+
 @contextmanager
 def sdpa_context(config):
     backend_name = getattr(config, "runtime_attention_backend", "auto")
@@ -83,5 +90,9 @@ def sdpa_context(config):
     from torch.nn.attention import sdpa_kernel
 
     backends = _resolve_sdpa_backends(backend_name)
-    with sdpa_kernel(backends, set_priority=True):
-        yield
+    token = _CURRENT_ATTENTION_BACKEND.set(backend_name)
+    try:
+        with sdpa_kernel(backends, set_priority=True):
+            yield
+    finally:
+        _CURRENT_ATTENTION_BACKEND.reset(token)

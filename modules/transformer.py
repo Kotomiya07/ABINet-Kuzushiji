@@ -10,6 +10,33 @@ from torch import Tensor
 from torch.nn import Dropout, LayerNorm, Linear, Module, ModuleList, Parameter
 from torch.nn import functional as F
 from torch.nn.init import constant_, xavier_uniform_
+from runtime_utils import get_runtime_attention_backend
+
+try:
+    from torch.nn.attention.flex_attention import flex_attention
+except ImportError:
+    flex_attention = None
+
+_COMPILED_FLEX_ATTENTION = None
+
+
+def _get_flex_attention_op():
+    global _COMPILED_FLEX_ATTENTION
+    if flex_attention is None:
+        return None
+    if _COMPILED_FLEX_ATTENTION is not None:
+        return _COMPILED_FLEX_ATTENTION
+    if hasattr(torch, "compile"):
+        _COMPILED_FLEX_ATTENTION = torch.compile(
+            flex_attention,
+            backend="inductor",
+            mode="default",
+            fullgraph=False,
+            dynamic=False,
+        )
+    else:
+        _COMPILED_FLEX_ATTENTION = flex_attention
+    return _COMPILED_FLEX_ATTENTION
 
 
 def _build_sdpa_mask(attn_mask, key_padding_mask, bsz, num_heads, tgt_len, src_len, dtype, device):
@@ -76,7 +103,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
                                  k_proj_weight=None,              # type: Optional[Tensor]
                                  v_proj_weight=None,              # type: Optional[Tensor]
                                  static_k=None,                   # type: Optional[Tensor]
-                                 static_v=None                    # type: Optional[Tensor]
+                                 static_v=None,                   # type: Optional[Tensor]
+                                 flex_block_mask=None,
+                                 flex_score_mod=None
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -232,8 +261,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
             q = F.linear(query, q_proj_weight_non_opt, in_proj_bias)
             k = F.linear(key, k_proj_weight_non_opt, in_proj_bias)
             v = F.linear(value, v_proj_weight_non_opt, in_proj_bias)
-    q = q * scaling
-
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
             attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
@@ -304,6 +331,34 @@ def multi_head_attention_forward(query,                           # type: Tensor
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
+    backend_name = get_runtime_attention_backend()
+    use_flex_attention = (
+        flex_attention is not None
+        and not need_weights
+        and query.is_cuda
+        and key.is_cuda
+        and value.is_cuda
+        and backend_name != "math_only"
+        and (flex_block_mask is not None or flex_score_mod is not None)
+    )
+
+    if use_flex_attention:
+        flex_attention_op = _get_flex_attention_op()
+        q_flex = q.reshape(tgt_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
+        k_flex = k.reshape(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
+        v_flex = v.reshape(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
+        attn_output = flex_attention_op(
+            q_flex,
+            k_flex,
+            v_flex,
+            score_mod=flex_score_mod,
+            block_mask=flex_block_mask,
+            scale=scaling,
+        )
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(tgt_len, bsz, embed_dim)
+        attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
+        return attn_output, None
+
     if not need_weights and hasattr(F, "scaled_dot_product_attention"):
         q = q.view(bsz, num_heads, tgt_len, head_dim)
         k = k.view(bsz, num_heads, src_len, head_dim)
@@ -330,6 +385,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
         return attn_output, None
 
+    q = q * scaling
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
@@ -456,7 +512,8 @@ class MultiheadAttention(Module):
         super(MultiheadAttention, self).__setstate__(state)
 
     def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
+                need_weights=True, attn_mask=None, flex_block_mask=None,
+                flex_score_mod=None):
         # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
         r"""
     Args:
@@ -503,7 +560,9 @@ class MultiheadAttention(Module):
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask, use_separate_proj_weight=True,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
-                v_proj_weight=self.v_proj_weight)
+                v_proj_weight=self.v_proj_weight,
+                flex_block_mask=flex_block_mask,
+                flex_score_mod=flex_score_mod)
         else:
             return multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -512,7 +571,9 @@ class MultiheadAttention(Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask)
+                attn_mask=attn_mask,
+                flex_block_mask=flex_block_mask,
+                flex_score_mod=flex_score_mod)
 
 
 class Transformer(Module):
@@ -715,7 +776,9 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt, memory, memory2=None, tgt_mask=None,
                 memory_mask=None, memory_mask2=None, tgt_key_padding_mask=None,
-                memory_key_padding_mask=None, memory_key_padding_mask2=None):
+                memory_key_padding_mask=None, memory_key_padding_mask2=None,
+                memory_flex_block_mask=None, memory_flex_score_mod=None,
+                memory_flex_block_mask2=None, memory_flex_score_mod2=None):
         # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
@@ -737,7 +800,11 @@ class TransformerDecoder(Module):
                          memory_mask=memory_mask, memory_mask2=memory_mask2,
                          tgt_key_padding_mask=tgt_key_padding_mask,
                          memory_key_padding_mask=memory_key_padding_mask,
-                         memory_key_padding_mask2=memory_key_padding_mask2)
+                         memory_key_padding_mask2=memory_key_padding_mask2,
+                         memory_flex_block_mask=memory_flex_block_mask,
+                         memory_flex_score_mod=memory_flex_score_mod,
+                         memory_flex_block_mask2=memory_flex_block_mask2,
+                         memory_flex_score_mod2=memory_flex_score_mod2)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -864,7 +931,9 @@ class TransformerDecoderLayer(Module):
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None,
-                memory2=None, memory_mask2=None, memory_key_padding_mask2=None):
+                memory2=None, memory_mask2=None, memory_key_padding_mask2=None,
+                memory_flex_block_mask=None, memory_flex_score_mod=None,
+                memory_flex_block_mask2=None, memory_flex_score_mod2=None):
         # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer.
 
@@ -886,12 +955,18 @@ class TransformerDecoderLayer(Module):
             tgt = self.norm1(tgt)
             if self.debug: self.attn = attn
         tgt2, attn2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask, need_weights=self.debug)
+                                   key_padding_mask=memory_key_padding_mask,
+                                   need_weights=self.debug,
+                                   flex_block_mask=memory_flex_block_mask,
+                                   flex_score_mod=memory_flex_score_mod)
         if self.debug: self.attn2 = attn2
 
         if self.siamese:
             tgt3, attn3 = self.multihead_attn2(tgt, memory2, memory2, attn_mask=memory_mask2,
-                            key_padding_mask=memory_key_padding_mask2, need_weights=self.debug)
+                            key_padding_mask=memory_key_padding_mask2,
+                            need_weights=self.debug,
+                            flex_block_mask=memory_flex_block_mask2,
+                            flex_score_mod=memory_flex_score_mod2)
             tgt = tgt + self.dropout2(tgt3)
             if self.debug: self.attn3 = attn3
 

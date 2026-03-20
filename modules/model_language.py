@@ -1,6 +1,7 @@
 import logging
 import torch
 import torch.nn as nn
+from torch.nn.attention.flex_attention import create_block_mask
 
 from utils import ifnone
 
@@ -53,6 +54,30 @@ class BCNLanguage(Model):
             if unexpected:
                 logging.debug(f"Unexpected keys: {unexpected}")
 
+    def _build_memory_flex_attention(self, lengths, device):
+        valid_lengths = lengths.to(device=device, dtype=torch.int32)
+        batch_size = int(valid_lengths.shape[0])
+
+        def score_mod(score, batch, head, q_idx, k_idx):
+            valid_k = k_idx < valid_lengths[batch]
+            not_self = q_idx != k_idx
+            keep = valid_k & not_self
+            return torch.where(keep, score, score.new_full((), float("-inf")))
+
+        def padding_mask_mod(batch, head, q_idx, k_idx):
+            return k_idx < valid_lengths[batch]
+
+        block_mask = create_block_mask(
+            padding_mask_mod,
+            B=batch_size,
+            H=None,
+            Q_LEN=self.max_length,
+            KV_LEN=self.max_length,
+            device=device,
+            _compile=False,
+        )
+        return block_mask, score_mod
+
     def forward(self, tokens, lengths):
         """
         Args:
@@ -64,6 +89,10 @@ class BCNLanguage(Model):
         embed = embed.permute(1, 0, 2)  # (T, N, E)
         embed = self.token_encoder(embed)  # (T, N, E)
         padding_mask = self._get_padding_mask(lengths, self.max_length)
+        memory_flex_block_mask = None
+        memory_flex_score_mod = None
+        if tokens.is_cuda:
+            memory_flex_block_mask, memory_flex_score_mod = self._build_memory_flex_attention(lengths, tokens.device)
 
         zeros = embed.new_zeros(*embed.shape)
         qeury = self.pos_encoder(zeros)
@@ -71,7 +100,9 @@ class BCNLanguage(Model):
         output = self.model(qeury, embed,
                 tgt_key_padding_mask=padding_mask,
                 memory_mask=location_mask,
-                memory_key_padding_mask=padding_mask)  # (T, N, E)
+                memory_key_padding_mask=padding_mask,
+                memory_flex_block_mask=memory_flex_block_mask,
+                memory_flex_score_mod=memory_flex_score_mod)  # (T, N, E)
         output = output.permute(1, 0, 2)  # (N, T, E)
 
         logits = self.cls(output)  # (N, T, C)

@@ -17,12 +17,20 @@ mp.set_sharing_strategy("file_system")
 # 畳み込みの最適アルゴリズムを動的選択し高速化
 import torch
 torch.backends.cudnn.benchmark = True
-# PyTorch 2.x: matmul の精度-速度バランスを調整
-if hasattr(torch, "set_float32_matmul_precision"):
-    torch.set_float32_matmul_precision("medium")
 # Ampere以降でTF32を許可し、行列演算を高速化
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
+    torch.backends.cuda.matmul.fp32_precision = "tf32"
+else:
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+if hasattr(torch.backends.cudnn, "conv") and hasattr(torch.backends.cudnn.conv, "fp32_precision"):
+    torch.backends.cudnn.conv.fp32_precision = "tf32"
+if hasattr(torch.backends.cudnn, "rnn") and hasattr(torch.backends.cudnn.rnn, "fp32_precision"):
+    torch.backends.cudnn.rnn.fp32_precision = "tf32"
+if hasattr(torch.backends.cudnn, "fp32_precision"):
+    torch.backends.cudnn.fp32_precision = "tf32"
+elif hasattr(torch.backends.cudnn, "allow_tf32"):
+    torch.backends.cudnn.allow_tf32 = True
 
 
 @hydra.main(config_path="configs", config_name="lightning.yaml", version_base=None)
