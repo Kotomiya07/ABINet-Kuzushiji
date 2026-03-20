@@ -16,6 +16,27 @@ import torch.multiprocessing as mp
 mp.set_sharing_strategy("file_system")
 # 畳み込みの最適アルゴリズムを動的選択し高速化
 import torch
+
+
+_ORIGINAL_GET_FLOAT32_MATMUL_PRECISION = torch.get_float32_matmul_precision
+
+
+def _safe_get_float32_matmul_precision():
+    try:
+        return _ORIGINAL_GET_FLOAT32_MATMUL_PRECISION()
+    except RuntimeError as exc:
+        if "mix of the legacy and new APIs" not in str(exc):
+            raise
+        backend_precision = getattr(torch.backends.cuda.matmul, "fp32_precision", "none")
+        if backend_precision == "ieee":
+            return "highest"
+        if backend_precision == "tf32":
+            return "high"
+        return "highest"
+
+
+torch.get_float32_matmul_precision = _safe_get_float32_matmul_precision
+
 torch.backends.cudnn.benchmark = True
 # Ampere以降でTF32を許可し、行列演算を高速化
 if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
