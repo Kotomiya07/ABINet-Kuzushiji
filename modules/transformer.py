@@ -344,9 +344,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     if use_flex_attention:
         flex_attention_op = _get_flex_attention_op()
-        q_flex = q.reshape(tgt_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
-        k_flex = k.reshape(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
-        v_flex = v.reshape(src_len, bsz, num_heads, head_dim).permute(1, 2, 0, 3).contiguous()
+        q_flex = q.reshape(bsz, num_heads, tgt_len, head_dim).contiguous()
+        k_flex = k.reshape(bsz, num_heads, src_len, head_dim).contiguous()
+        v_flex = v.reshape(bsz, num_heads, src_len, head_dim).contiguous()
         attn_output = flex_attention_op(
             q_flex,
             k_flex,
