@@ -57,11 +57,18 @@ class ABINetLightningModule(pl.LightningModule):
                     return res
         return outputs
 
+    def _get_length(self, logits: torch.Tensor) -> torch.Tensor:
+        null_mask = logits.argmax(dim=-1) == self.charset.null_label
+        non_zero_mask = null_mask.int() != 0
+        mask_max_values, mask_max_indices = torch.max(non_zero_mask.int(), dim=-1)
+        mask_max_indices[mask_max_values == 0] = -1
+        return mask_max_indices + 1
+
     def _word_accuracy(self, outputs, labels, lengths):
         res = self._pick_output(outputs)
         logits = res['logits']
         pred_ids = logits.argmax(dim=-1)
-        pred_lengths = self.model._get_length(logits)
+        pred_lengths = self._get_length(logits)
 
         if labels.dim() == 3:
             labels = labels.argmax(dim=-1)

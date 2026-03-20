@@ -40,8 +40,21 @@ class BCNLanguage(Model):
         if config.model_language_checkpoint is not None:
             logging.info(f'Read language model from {config.model_language_checkpoint}.')
             # 文字集合サイズが異なる場合、分類ヘッド（proj/cls）は破棄して本体のみ読み込む
-            state = torch.load(config.model_language_checkpoint, map_location=None)
-            model_state = state["model"]
+            state = torch.load(config.model_language_checkpoint, map_location=None, weights_only=False)
+            if "model" in state:
+                model_state = state["model"]
+            elif "state_dict" in state:
+                model_state = {}
+                for key, value in state["state_dict"].items():
+                    if key.startswith("model._orig_mod."):
+                        new_key = key[len("model._orig_mod."):]
+                    elif key.startswith("model."):
+                        new_key = key[len("model."):]
+                    else:
+                        new_key = key
+                    model_state[new_key] = value
+            else:
+                model_state = state
             drop_prefixes = ("proj.", "cls.")
             removed = [k for k in list(model_state.keys()) if k.startswith(drop_prefixes)]
             for k in removed:

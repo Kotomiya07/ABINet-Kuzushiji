@@ -16,8 +16,22 @@ class Model(nn.Module):
         self.charset = CharsetMapper(config.dataset_charset_path, max_length=self.max_length)
 
     def load(self, source, device=None, strict=True):
-        state = torch.load(source, map_location=device)
-        self.load_state_dict(state['model'], strict=strict)
+        state = torch.load(source, map_location=device, weights_only=False)
+        if 'model' in state:
+            model_state = state['model']
+        elif 'state_dict' in state:
+            model_state = {}
+            for key, value in state['state_dict'].items():
+                if key.startswith('model._orig_mod.'):
+                    new_key = key[len('model._orig_mod.'):]
+                elif key.startswith('model.'):
+                    new_key = key[len('model.'):]
+                else:
+                    new_key = key
+                model_state[new_key] = value
+        else:
+            model_state = state
+        self.load_state_dict(model_state, strict=strict)
 
     def _get_length(self, logit):
         """ Greed decoder to obtain length from logit"""
