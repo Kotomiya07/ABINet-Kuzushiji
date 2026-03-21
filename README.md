@@ -143,7 +143,8 @@ datasets
      trainer.max_epochs=10 \
      wandb.enable=false
    ```
-   縦長列に合わせて横幅を広げた比較用設定:
+   古典籍向け既定値では、縦長列画像をデータ読み込み時に反時計回り 90 度回転し、比率保持リサイズを使います。
+   `64x256` の比較用設定:
    ```
    uv run python train_lightning.py \
      --config-name lightning_vision \
@@ -174,14 +175,29 @@ datasets
      --config-name lightning \
      config_path=configs/train_abinet_japanese_classical.yaml \
      trainer.max_epochs=10 \
+     model.vision.checkpoint=/path/to/pretrain_vision.ckpt \
+     model.language.checkpoint=/path/to/pretrain_language.ckpt \
      wandb.enable=false
    ```
+   古典籍向け本学習 config は pretrained checkpoint の指定を必須にしています。未指定なら fail-fast します。
    `64x256` 設定を使う場合:
    ```
    uv run python train_lightning.py \
      --config-name lightning \
      config_path=configs/train_abinet_japanese_classical_64x256.yaml \
      trainer.max_epochs=10 \
+     model.vision.checkpoint=/path/to/pretrain_vision.ckpt \
+     model.language.checkpoint=/path/to/pretrain_language.ckpt \
+     wandb.enable=false
+   ```
+   `64x384` 設定を明示的に使う場合:
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning \
+     config_path=configs/train_abinet_japanese_classical_64x384.yaml \
+     trainer.max_epochs=10 \
+     model.vision.checkpoint=/path/to/pretrain_vision.ckpt \
+     model.language.checkpoint=/path/to/pretrain_language.ckpt \
      wandb.enable=false
    ```
 

@@ -22,8 +22,10 @@ dataset:
   case_sensitive: False
   eval_case_sensitive: False
   data_aug: True
-  multiscales: False
+  multiscales: True
   pin_memory: True
+  rotate_if_vertical: True
+  rotate_direction: ccw
   smooth_label: False
   smooth_factor: 0.1
   one_hot_y: True
@@ -34,6 +36,7 @@ training:
   show_iters: 50
   eval_iters: 2000
   save_iters: 2000
+  require_pretrained: True
 
 optimizer:
   type: Adam
@@ -95,16 +98,16 @@ augmentation:
   color_jitter: [0.15, 0.15, 0.0, 0.0]
   color_jitter_p: 0.1
   geometry: {
-    degrees: 5,
-    translate: [0.0, 0.0],
-    scale: [0.9, 1.1],
-    shear: [3, 1],
-  }
-  geometry_distortion: 0.1
-  geometry_p: 0.15
-  deterioration: {
-    var: 8,
     degrees: 3,
+    translate: [0.0, 0.0],
+    scale: [0.95, 1.05],
+    shear: [2, 1],
+  }
+  geometry_distortion: 0.05
+  geometry_p: 0.1
+  deterioration: {
+    var: 6,
+    degrees: 2,
     factor: 2,
-    p: 0.1,
+    p: 0.05,
   }

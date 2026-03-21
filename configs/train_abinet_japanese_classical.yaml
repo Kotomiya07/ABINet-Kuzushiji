@@ -8,22 +8,24 @@ global:
 dataset:
   train: {
     roots: ['data/japanese_classical_column_lmdb/train'],
-    batch_size: 128
+    batch_size: 64
   }
   test: {
     roots: ['data/japanese_classical_column_lmdb/val'],
-    batch_size: 128
+    batch_size: 64
   }
   charset_path: data/japanese_classical_column_lmdb/charset_japanese_classical_column.txt
   num_workers: 8
   max_length: 40
   image_height: 64
-  image_width: 192
+  image_width: 384
   case_sensitive: False
   eval_case_sensitive: False
   data_aug: True
-  multiscales: False
+  multiscales: True
   pin_memory: True
+  rotate_if_vertical: True
+  rotate_direction: ccw
   smooth_label: False
   smooth_factor: 0.1
   one_hot_y: True
@@ -34,6 +36,7 @@ training:
   show_iters: 50
   eval_iters: 2000
   save_iters: 2000
+  require_pretrained: True
 
 optimizer:
   type: Adam
@@ -61,9 +64,9 @@ model:
     attention: 'position',
     backbone: 'transformer',
     backbone_ln: 3,
-    max_len: 1200,
+    max_len: 2400,
     feat_h: 16,
-    feat_w: 48,
+    feat_w: 96,
     enc_with_vision: False,
     iter_size: 2,
     mask: False,
@@ -92,16 +95,19 @@ model:
   loss_weight: [1., 1.]
 
 augmentation:
-  color_jitter: [0.5, 0.5, 0.5, 0.5]
+  color_jitter: [0.15, 0.15, 0.0, 0.0]
+  color_jitter_p: 0.1
   geometry: {
-    degrees: 45,
+    degrees: 3,
     translate: [0.0, 0.0],
-    scale: [0.5, 2.],
-    shear: [45, 15],
+    scale: [0.95, 1.05],
+    shear: [2, 1],
   }
+  geometry_distortion: 0.05
+  geometry_p: 0.1
   deterioration: {
-    var: 20,
-    degrees: 6,
-    factor: 4,
-    p: 0.25,
+    var: 6,
+    degrees: 2,
+    factor: 2,
+    p: 0.05,
   }

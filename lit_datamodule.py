@@ -67,6 +67,8 @@ class ABINetDataModule(pl.LightningDataModule):
                 multiscales=self.config.dataset_multiscales,
                 one_hot_y=self.config.dataset_one_hot_y,
                 readahead=self.config.dataset_readahead,
+                rotate_if_vertical=getattr(self.config, "dataset_rotate_if_vertical", False),
+                rotate_direction=getattr(self.config, "dataset_rotate_direction", "ccw"),
                 augmentation_color_jitter=self.config.augmentation_color_jitter,
                 augmentation_color_jitter_p=self.config.augmentation_color_jitter_p,
                 augmentation_geometry=self.config.augmentation_geometry,

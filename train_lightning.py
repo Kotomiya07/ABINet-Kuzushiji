@@ -1,4 +1,6 @@
 import os
+import logging
+from pathlib import Path
 
 import hydra
 from hydra import utils as hydra_utils
@@ -17,41 +19,59 @@ mp.set_sharing_strategy("file_system")
 # 畳み込みの最適アルゴリズムを動的選択し高速化
 import torch
 
-
-_ORIGINAL_GET_FLOAT32_MATMUL_PRECISION = torch.get_float32_matmul_precision
-
-
-def _safe_get_float32_matmul_precision():
-    try:
-        return _ORIGINAL_GET_FLOAT32_MATMUL_PRECISION()
-    except RuntimeError as exc:
-        if "mix of the legacy and new APIs" not in str(exc):
-            raise
-        backend_precision = getattr(torch.backends.cuda.matmul, "fp32_precision", "none")
-        if backend_precision == "ieee":
-            return "highest"
-        if backend_precision == "tf32":
-            return "high"
-        return "highest"
-
-
-torch.get_float32_matmul_precision = _safe_get_float32_matmul_precision
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
 
 torch.backends.cudnn.benchmark = True
-# Ampere以降でTF32を許可し、行列演算を高速化
-if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
-    torch.backends.cuda.matmul.fp32_precision = "tf32"
-else:
-    torch.backends.cuda.matmul.allow_tf32 = True
+torch.set_float32_matmul_precision("high")
 
-if hasattr(torch.backends.cudnn, "conv") and hasattr(torch.backends.cudnn.conv, "fp32_precision"):
-    torch.backends.cudnn.conv.fp32_precision = "tf32"
-if hasattr(torch.backends.cudnn, "rnn") and hasattr(torch.backends.cudnn.rnn, "fp32_precision"):
-    torch.backends.cudnn.rnn.fp32_precision = "tf32"
-if hasattr(torch.backends.cudnn, "fp32_precision"):
-    torch.backends.cudnn.fp32_precision = "tf32"
-elif hasattr(torch.backends.cudnn, "allow_tf32"):
-    torch.backends.cudnn.allow_tf32 = True
+
+def _validate_checkpoint(path_value, name):
+    if path_value is None:
+        return
+    checkpoint_path = Path(path_value)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"{name} checkpoint not found: {checkpoint_path}")
+
+
+def _validate_training_config(config):
+    stage = config.global_stage
+    vision_ckpt = getattr(config, "model_vision_checkpoint", None)
+    language_ckpt = getattr(config, "model_language_checkpoint", None)
+
+    _validate_checkpoint(vision_ckpt, "vision")
+    _validate_checkpoint(language_ckpt, "language")
+
+    if stage == "train-super" and getattr(config, "training_require_pretrained", False):
+        missing = []
+        if vision_ckpt is None:
+            missing.append("model.vision.checkpoint")
+        if language_ckpt is None:
+            missing.append("model.language.checkpoint")
+        if missing:
+            joined = ", ".join(missing)
+            raise ValueError(
+                "Pretrained checkpoints are required for this config. "
+                f"Set the following values explicitly: {joined}"
+            )
+
+
+def _log_training_summary(config):
+    logging.info(
+        "Training summary: stage=%s image_size=%sx%s multiscales=%s rotate_if_vertical=%s rotate_direction=%s",
+        config.global_stage,
+        getattr(config, "dataset_image_height", None),
+        getattr(config, "dataset_image_width", None),
+        getattr(config, "dataset_multiscales", None),
+        getattr(config, "dataset_rotate_if_vertical", False),
+        getattr(config, "dataset_rotate_direction", "ccw"),
+    )
+    logging.info(
+        "Checkpoint summary: vision=%s language=%s require_pretrained=%s",
+        getattr(config, "model_vision_checkpoint", None),
+        getattr(config, "model_language_checkpoint", None),
+        getattr(config, "training_require_pretrained", False),
+    )
 
 
 @hydra.main(config_path="configs", config_name="lightning.yaml", version_base=None)
@@ -66,6 +86,9 @@ def main(cfg):
     # Hydra側からepochを上書き可能に
     if cfg.trainer.max_epochs is not None:
         base_config.training_epochs = cfg.trainer.max_epochs
+
+    _validate_training_config(base_config)
+    _log_training_summary(base_config)
 
     pl.seed_everything(base_config.global_seed or 42, workers=True)
 

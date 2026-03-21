@@ -51,6 +51,8 @@ class ImageDataset(Dataset):
         augmentation_geometry_distortion: float = 0.5,
         augmentation_geometry_p: float = 0.5,
         augmentation_deterioration=None,
+        rotate_if_vertical: bool = False,
+        rotate_direction: str = "ccw",
         **kwargs,
     ):
         self.path, self.name = Path(path), Path(path).name
@@ -61,6 +63,8 @@ class ImageDataset(Dataset):
         self.return_idx, self.return_raw = return_idx, return_raw
         self.case_sensitive, self.is_training = case_sensitive, is_training
         self.data_aug, self.multiscales = data_aug, multiscales
+        self.rotate_if_vertical = rotate_if_vertical
+        self.rotate_direction = rotate_direction
         self.charset = CharsetMapper(charset_path, max_length=max_length + 1)
         self.character = self.charset.label_to_char.values()
         self.c = self.charset.num_classes
@@ -212,13 +216,26 @@ class ImageDataset(Dataset):
             return image, label, idx
 
     def _process_training(self, image):
+        image = self._normalize_orientation(image)
         if self.data_aug:
             image = self.augment_tfs(image)
         image = self.resize(np.array(image))
         return image
 
     def _process_test(self, image):
+        image = self._normalize_orientation(image)
         return self.resize(np.array(image))  # TODO:move is_training to here
+
+    def _normalize_orientation(self, image):
+        if not self.rotate_if_vertical:
+            return image
+        if image.height <= image.width:
+            return image
+        if self.rotate_direction == "ccw":
+            return image.transpose(Image.Transpose.ROTATE_90)
+        if self.rotate_direction == "cw":
+            return image.transpose(Image.Transpose.ROTATE_270)
+        raise ValueError(f"Unsupported rotate_direction: {self.rotate_direction}")
 
     def __getitem__(self, idx):
         image, text, idx_new = self.get(idx)

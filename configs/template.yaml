@@ -36,6 +36,8 @@ dataset:
   prefetch_factor: 4
   readahead: True
   channels_last: True
+  rotate_if_vertical: False
+  rotate_direction: ccw
   smooth_label: False
   smooth_factor: 0.1
   one_hot_y: True
@@ -49,6 +51,7 @@ training:
   start_iters: 0
   stats_iters: 100000
   metric_interval: 50
+  require_pretrained: False
 
 optimizer:
   type: Adadelta # Adadelta, Adam
