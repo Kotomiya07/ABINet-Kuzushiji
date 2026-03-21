@@ -38,6 +38,10 @@ dataset:
   channels_last: True
   rotate_if_vertical: False
   rotate_direction: ccw
+  resize_mode: legacy
+  padding_mode: replicate
+  padding_align: center
+  padding_value: ~
   smooth_label: False
   smooth_factor: 0.1
   one_hot_y: True

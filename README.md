@@ -143,7 +143,7 @@ datasets
      trainer.max_epochs=10 \
      wandb.enable=false
    ```
-   古典籍向け既定値では、縦長列画像をデータ読み込み時に反時計回り 90 度回転し、比率保持リサイズを使います。
+   古典籍向け既定値では、縦長列画像をデータ読み込み時に反時計回り 90 度回転し、左揃えの letterbox で比率保持リサイズを使います。
    `64x256` の比較用設定:
    ```
    uv run python train_lightning.py \

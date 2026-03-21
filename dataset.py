@@ -53,6 +53,10 @@ class ImageDataset(Dataset):
         augmentation_deterioration=None,
         rotate_if_vertical: bool = False,
         rotate_direction: str = "ccw",
+        resize_mode: str = "legacy",
+        padding_mode: str = "replicate",
+        padding_align: str = "center",
+        padding_value=None,
         **kwargs,
     ):
         self.path, self.name = Path(path), Path(path).name
@@ -65,6 +69,10 @@ class ImageDataset(Dataset):
         self.data_aug, self.multiscales = data_aug, multiscales
         self.rotate_if_vertical = rotate_if_vertical
         self.rotate_direction = rotate_direction
+        self.resize_mode = resize_mode
+        self.padding_mode = padding_mode
+        self.padding_align = padding_align
+        self.padding_value = padding_value
         self.charset = CharsetMapper(charset_path, max_length=max_length + 1)
         self.character = self.charset.label_to_char.values()
         self.c = self.charset.num_classes
@@ -175,10 +183,54 @@ class ImageDataset(Dataset):
             return _resize_ratio(img, img.shape[0] / img.shape[1])  # keep aspect ratio
 
     def resize(self, img):
+        if self.resize_mode == "letterbox":
+            return self.resize_letterbox(img)
         if self.multiscales:
             return self.resize_multiscales(img, cv2.BORDER_REPLICATE)
         else:
             return cv2.resize(img, (self.img_w, self.img_h))
+
+    def _estimate_padding_value(self, img):
+        if self.padding_value is not None:
+            return tuple(int(v) for v in self.padding_value)
+        if self.padding_mode != "edge_median":
+            return (0, 0, 0)
+
+        h, w = img.shape[:2]
+        edge_h = min(8, max(1, h // 4))
+        edge_w = min(8, max(1, w // 4))
+        edge_pixels = np.concatenate(
+            [
+                img[:edge_h, :, :].reshape(-1, img.shape[2]),
+                img[-edge_h:, :, :].reshape(-1, img.shape[2]),
+                img[:, :edge_w, :].reshape(-1, img.shape[2]),
+                img[:, -edge_w:, :].reshape(-1, img.shape[2]),
+            ],
+            axis=0,
+        )
+        return tuple(int(v) for v in np.median(edge_pixels, axis=0))
+
+    def resize_letterbox(self, img):
+        h, w = img.shape[:2]
+        scale = min(self.img_w / max(w, 1), self.img_h / max(h, 1))
+        trg_w = max(1, int(round(w * scale)))
+        trg_h = max(1, int(round(h * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
+        resized = cv2.resize(img, (trg_w, trg_h), interpolation=interpolation)
+
+        pad_color = self._estimate_padding_value(img)
+        canvas = np.full((self.img_h, self.img_w, img.shape[2]), pad_color, dtype=np.uint8)
+
+        top = (self.img_h - trg_h) // 2
+        if self.padding_align == "left":
+            left = 0
+        elif self.padding_align == "center":
+            left = (self.img_w - trg_w) // 2
+        else:
+            raise ValueError(f"Unsupported padding_align: {self.padding_align}")
+
+        canvas[top : top + trg_h, left : left + trg_w] = resized
+        return canvas
 
     def get(self, idx):
         env = self._ensure_env()

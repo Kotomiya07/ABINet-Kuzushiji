@@ -26,6 +26,9 @@ dataset:
   pin_memory: True
   rotate_if_vertical: True
   rotate_direction: ccw
+  resize_mode: letterbox
+  padding_mode: edge_median
+  padding_align: left
   smooth_label: False
   smooth_factor: 0.1
   one_hot_y: True
