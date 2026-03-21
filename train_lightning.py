@@ -1,9 +1,11 @@
 import os
 import logging
 from pathlib import Path
+from typing import Any
 
 import hydra
 from hydra import utils as hydra_utils
+from omegaconf import OmegaConf
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -74,6 +76,42 @@ def _log_training_summary(config):
     )
 
 
+def _to_serializable(value: Any):
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, tuple):
+        return [_to_serializable(v) for v in value]
+    if isinstance(value, list):
+        return [_to_serializable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _to_serializable(v) for k, v in value.items()}
+    return value
+
+
+def _flatten_dict(data, prefix=""):
+    flat = {}
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            flat.update(_flatten_dict(value, full_key))
+        else:
+            flat[full_key] = _to_serializable(value)
+    return flat
+
+
+def _build_wandb_config(base_config, hydra_cfg):
+    base_items = {
+        key: value
+        for key, value in vars(base_config).items()
+        if not key.startswith("_")
+    }
+    hydra_items = OmegaConf.to_container(hydra_cfg, resolve=True)
+    return {
+        **_flatten_dict({"train": base_items}),
+        **_flatten_dict({"hydra": hydra_items}),
+    }
+
+
 @hydra.main(config_path="configs", config_name="lightning.yaml", version_base=None)
 def main(cfg):
     # Hydraはデフォルトで作業ディレクトリを移動するので元に戻す
@@ -128,6 +166,9 @@ def main(cfg):
             tags=cfg.wandb.tags,
             log_model=True,
         )
+        wandb_config = _build_wandb_config(base_config, cfg)
+        wandb_logger.experiment.config.update(wandb_config, allow_val_change=True)
+        wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
         accelerator=cfg.trainer.accelerator,
