@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 import numpy as np
@@ -16,6 +17,8 @@ class Model(nn.Module):
         self.charset = CharsetMapper(config.dataset_charset_path, max_length=self.max_length)
 
     def load(self, source, device=None, strict=True):
+        if device is None and not torch.cuda.is_available():
+            device = torch.device("cpu")
         state = torch.load(source, map_location=device, weights_only=False)
         if 'model' in state:
             model_state = state['model']
@@ -31,7 +34,22 @@ class Model(nn.Module):
                 model_state[new_key] = value
         else:
             model_state = state
-        self.load_state_dict(model_state, strict=strict)
+        current_state = self.state_dict()
+        mismatched = []
+        for key, value in list(model_state.items()):
+            if key in current_state and current_state[key].shape != value.shape:
+                mismatched.append((key, tuple(value.shape), tuple(current_state[key].shape)))
+                model_state.pop(key)
+
+        effective_strict = strict and not mismatched
+        missing, unexpected = self.load_state_dict(model_state, strict=effective_strict)
+
+        if mismatched:
+            logging.warning("Skip mismatched checkpoint params: %s", mismatched)
+        if missing and not effective_strict:
+            logging.info("Missing keys while loading checkpoint: %s", missing)
+        if unexpected and not effective_strict:
+            logging.info("Unexpected keys while loading checkpoint: %s", unexpected)
 
     def _get_length(self, logit):
         """ Greed decoder to obtain length from logit"""

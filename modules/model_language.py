@@ -40,7 +40,10 @@ class BCNLanguage(Model):
         if config.model_language_checkpoint is not None:
             logging.info(f'Read language model from {config.model_language_checkpoint}.')
             # 文字集合サイズが異なる場合、分類ヘッド（proj/cls）は破棄して本体のみ読み込む
-            state = torch.load(config.model_language_checkpoint, map_location=None, weights_only=False)
+            map_location = None
+            if not torch.cuda.is_available():
+                map_location = torch.device("cpu")
+            state = torch.load(config.model_language_checkpoint, map_location=map_location, weights_only=False)
             if "model" in state:
                 model_state = state["model"]
             elif "state_dict" in state:
