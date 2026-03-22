@@ -112,6 +112,24 @@ def _build_wandb_config(base_config, hydra_cfg):
     }
 
 
+def _apply_legacy_section_overrides(base_config, section_name, section_cfg):
+    if section_cfg is None:
+        return
+    section_dict = OmegaConf.to_container(section_cfg, resolve=True)
+    if not isinstance(section_dict, dict):
+        return
+
+    def _apply(data, prefix):
+        for key, value in data.items():
+            attr_name = f"{prefix}_{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                _apply(value, attr_name)
+            else:
+                setattr(base_config, attr_name, value)
+
+    _apply(section_dict, section_name)
+
+
 @hydra.main(config_path="configs", config_name="lightning.yaml", version_base=None)
 def main(cfg):
     # Hydraはデフォルトで作業ディレクトリを移動するので元に戻す
@@ -120,6 +138,8 @@ def main(cfg):
     # 従来のYAMLを読み込み（テンプレートも適用）
     base_config = Config(cfg.config_path)
     apply_runtime_overrides(base_config, getattr(cfg, "runtime", None))
+    for section_name in ("global", "dataset", "training", "optimizer", "model", "augmentation"):
+        _apply_legacy_section_overrides(base_config, section_name, getattr(cfg, section_name, None))
 
     # Hydra側からepochを上書き可能に
     if cfg.trainer.max_epochs is not None:
@@ -179,6 +199,9 @@ def main(cfg):
         gradient_clip_val=base_config.optimizer_clip_grad,
         val_check_interval=getattr(cfg.trainer, "val_check_interval", 1.0),
         num_sanity_val_steps=getattr(cfg.trainer, "num_sanity_val_steps", 2),
+        limit_train_batches=getattr(cfg.trainer, "limit_train_batches", 1.0),
+        limit_val_batches=getattr(cfg.trainer, "limit_val_batches", 1.0),
+        enable_progress_bar=getattr(cfg.trainer, "enable_progress_bar", True),
         callbacks=callbacks,
         logger=wandb_logger,
     )

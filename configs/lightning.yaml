@@ -9,6 +9,24 @@ hydra:
 
 # ベースとなる従来の設定ファイルパス
 config_path: train_abinet.yaml
+global: {}
+dataset:
+  train: {}
+  test: {}
+training: {}
+optimizer:
+  args: {}
+  scheduler: {}
+model:
+  vision:
+    checkpoint: null
+  language:
+    checkpoint: null
+  fusion: {}
+  transformer: {}
+augmentation:
+  geometry: {}
+  deterioration: {}
 
 trainer:
   accelerator: auto

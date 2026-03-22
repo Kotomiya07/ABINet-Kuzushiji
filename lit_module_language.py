@@ -15,6 +15,12 @@ except ImportError:
     SCHEDULEFREE_AVAILABLE = False
 
 
+def _mark_cudagraph_step_begin():
+    compiler = getattr(torch, "compiler", None)
+    if compiler is not None and hasattr(compiler, "cudagraph_mark_step_begin"):
+        compiler.cudagraph_mark_step_begin()
+
+
 class LanguageLightningModule(pl.LightningModule):
     """Language-only pretrain LightningModule (BCNLanguage)."""
 
@@ -29,6 +35,7 @@ class LanguageLightningModule(pl.LightningModule):
         self.save_hyperparameters(ignore=["model", "config"])
 
     def forward(self, tokens, lengths):
+        _mark_cudagraph_step_begin()
         return self.model(tokens, lengths)
 
     def _character_accuracy(self, outputs, labels, lengths):

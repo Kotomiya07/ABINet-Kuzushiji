@@ -9,6 +9,24 @@ hydra:
 
 # 事前学習用の元設定ファイル
 config_path: configs/pretrain_language_model.yaml
+global: {}
+dataset:
+  train: {}
+  test: {}
+training: {}
+optimizer:
+  args: {}
+  scheduler: {}
+model:
+  vision:
+    checkpoint: null
+  language:
+    checkpoint: null
+  fusion: {}
+  transformer: {}
+augmentation:
+  geometry: {}
+  deterioration: {}
 
 trainer:
   accelerator: auto

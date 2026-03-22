@@ -25,6 +25,12 @@ def _load_model(config):
     return cls(config)
 
 
+def _mark_cudagraph_step_begin():
+    compiler = getattr(torch, "compiler", None)
+    if compiler is not None and hasattr(compiler, "cudagraph_mark_step_begin"):
+        compiler.cudagraph_mark_step_begin()
+
+
 class ABINetLightningModule(pl.LightningModule):
     """LightningModule for ABINet (vision + language)."""
 
@@ -43,6 +49,7 @@ class ABINetLightningModule(pl.LightningModule):
         self.save_hyperparameters(ignore=['model', 'config'])
 
     def forward(self, images):
+        _mark_cudagraph_step_begin()
         return self.model(images)
 
     # --- metrics ---

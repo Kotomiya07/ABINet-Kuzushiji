@@ -1032,7 +1032,9 @@ class PositionalEncoding(nn.Module):
             >>> output = pos_encoder(x)
         """
 
-        x = x + self.pe[:x.size(0), :]
+        # torch.compile + CUDAGraphs 下では buffer slice の再利用で
+        # overwritten tensor エラーが起きることがあるため clone する。
+        x = x + self.pe[:x.size(0), :].clone()
         return self.dropout(x)
 
 
