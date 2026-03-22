@@ -27,12 +27,15 @@ class BCNLanguage(Model):
         self.loss_weight = ifnone(config.model_language_loss_weight, 1.0)
         self.max_length = config.dataset_max_length + 1  # additional stop token
         self.debug = ifnone(config.global_debug, False)
+        self.fullgraph_train = ifnone(getattr(config, "runtime_fullgraph_train", False), False)
+        attention_impl = "sdpa" if self.fullgraph_train else "runtime"
 
         self.proj = nn.Linear(self.charset.num_classes, d_model, False)
         self.token_encoder = PositionalEncoding(d_model, max_len=self.max_length)
         self.pos_encoder = PositionalEncoding(d_model, dropout=0, max_len=self.max_length)
         decoder_layer = TransformerDecoderLayer(d_model, nhead, d_inner, dropout, 
-                activation, self_attn=self.use_self_attn, debug=self.debug)
+                activation, self_attn=self.use_self_attn, debug=self.debug,
+                attention_impl=attention_impl)
         self.model = TransformerDecoder(decoder_layer, num_layers)
 
         self.cls = nn.Linear(d_model, self.charset.num_classes)
@@ -94,6 +97,11 @@ class BCNLanguage(Model):
         )
         return block_mask, score_mod
 
+    def _build_fast_masks(self, lengths, device):
+        padding_mask = self._get_padding_mask(lengths, self.max_length)
+        location_mask = self._get_location_mask(self.max_length, device)
+        return padding_mask, location_mask
+
     def forward(self, tokens, lengths):
         """
         Args:
@@ -107,12 +115,15 @@ class BCNLanguage(Model):
         padding_mask = self._get_padding_mask(lengths, self.max_length)
         memory_flex_block_mask = None
         memory_flex_score_mod = None
-        if tokens.is_cuda:
+        if tokens.is_cuda and not self.fullgraph_train:
             memory_flex_block_mask, memory_flex_score_mod = self._build_memory_flex_attention(lengths, tokens.device)
 
         zeros = embed.new_zeros(*embed.shape)
         qeury = self.pos_encoder(zeros)
-        location_mask = self._get_location_mask(self.max_length, tokens.device)
+        if self.fullgraph_train:
+            padding_mask, location_mask = self._build_fast_masks(lengths, tokens.device)
+        else:
+            location_mask = self._get_location_mask(self.max_length, tokens.device)
         output = self.model(qeury, embed,
                 tgt_key_padding_mask=padding_mask,
                 memory_mask=location_mask,

@@ -14,6 +14,7 @@ class ABINetIterModel(nn.Module):
         super().__init__()
         self.iter_size = ifnone(config.model_iter_size, 1)
         self.max_length = config.dataset_max_length + 1  # additional stop token
+        self.fullgraph_train = ifnone(getattr(config, "runtime_fullgraph_train", False), False)
         self.vision = BaseVision(config)
         self.language = BCNLanguage(config)
         self.alignment = BaseAlignment(config)
@@ -25,14 +26,15 @@ class ABINetIterModel(nn.Module):
         all_l_res, all_a_res = [], []
         for _ in range(self.iter_size):
             tokens = torch.softmax(a_res['logits'], dim=-1)
-            lengths = a_res['pt_lengths']
-            lengths.clamp_(2, self.max_length)  # TODO:move to langauge model
+            lengths = a_res['pt_lengths'].clamp(2, self.max_length)
             l_res = self.language(tokens, lengths)
             all_l_res.append(l_res)
             a_res = self.alignment(l_res['feature'], v_res['feature'])
             all_a_res.append(a_res)
         if self.export:
             return F.softmax(a_res['logits'], dim=2), a_res['pt_lengths']
+        if self.fullgraph_train:
+            return all_a_res, all_l_res, v_res
         if self.training:
             return all_a_res, all_l_res, v_res
         else:

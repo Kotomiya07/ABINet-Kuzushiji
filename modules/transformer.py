@@ -105,7 +105,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
                                  static_k=None,                   # type: Optional[Tensor]
                                  static_v=None,                   # type: Optional[Tensor]
                                  flex_block_mask=None,
-                                 flex_score_mod=None
+                                 flex_score_mod=None,
+                                 attn_kind="generic",
+                                 attention_impl="runtime",
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -183,11 +185,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
     scaling = float(head_dim) ** -0.5
 
     if not use_separate_proj_weight:
-        if torch.equal(query, key) and torch.equal(key, value):
+        if attn_kind == "self":
             # self-attention
             q, k, v = F.linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif torch.equal(key, value):
+        elif attn_kind == "cross":
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
@@ -331,16 +333,30 @@ def multi_head_attention_forward(query,                           # type: Tensor
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
-    backend_name = get_runtime_attention_backend()
-    use_flex_attention = (
-        flex_attention is not None
-        and not need_weights
-        and query.is_cuda
-        and key.is_cuda
-        and value.is_cuda
-        and backend_name != "math_only"
-        and (flex_block_mask is not None or flex_score_mod is not None)
-    )
+    runtime_backend_name = None
+    if attention_impl == "runtime":
+        runtime_backend_name = get_runtime_attention_backend()
+
+    use_flex_attention = False
+    if attention_impl == "flex":
+        use_flex_attention = (
+            flex_attention is not None
+            and not need_weights
+            and query.is_cuda
+            and key.is_cuda
+            and value.is_cuda
+            and (flex_block_mask is not None or flex_score_mod is not None)
+        )
+    elif attention_impl == "runtime":
+        use_flex_attention = (
+            flex_attention is not None
+            and not need_weights
+            and query.is_cuda
+            and key.is_cuda
+            and value.is_cuda
+            and runtime_backend_name != "math_only"
+            and (flex_block_mask is not None or flex_score_mod is not None)
+        )
 
     if use_flex_attention:
         flex_attention_op = _get_flex_attention_op()
@@ -449,12 +465,26 @@ class MultiheadAttention(Module):
     # }
     __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
 
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+    def __init__(
+        self,
+        embed_dim,
+        num_heads,
+        dropout=0.,
+        bias=True,
+        add_bias_kv=False,
+        add_zero_attn=False,
+        kdim=None,
+        vdim=None,
+        attn_kind="generic",
+        attention_impl="runtime",
+    ):
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
         self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+        self.attn_kind = attn_kind
+        self.attention_impl = attention_impl
 
         self.num_heads = num_heads
         self.dropout = dropout
@@ -562,7 +592,9 @@ class MultiheadAttention(Module):
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
                 v_proj_weight=self.v_proj_weight,
                 flex_block_mask=flex_block_mask,
-                flex_score_mod=flex_score_mod)
+                flex_score_mod=flex_score_mod,
+                attn_kind=self.attn_kind,
+                attention_impl=self.attention_impl)
         else:
             return multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -573,7 +605,9 @@ class MultiheadAttention(Module):
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask,
                 flex_block_mask=flex_block_mask,
-                flex_score_mod=flex_score_mod)
+                flex_score_mod=flex_score_mod,
+                attn_kind=self.attn_kind,
+                attention_impl=self.attention_impl)
 
 
 class Transformer(Module):
@@ -832,11 +866,17 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, 
-                 activation="relu", debug=False):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+                 activation="relu", debug=False, attention_impl="runtime"):
         super(TransformerEncoderLayer, self).__init__()
         self.debug = debug
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            attn_kind="self",
+            attention_impl=attention_impl,
+        )
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward)
         self.dropout = Dropout(dropout)
@@ -900,16 +940,29 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, 
-                 activation="relu", self_attn=True, siamese=False, debug=False):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+                 activation="relu", self_attn=True, siamese=False, debug=False,
+                 attention_impl="runtime"):
         super(TransformerDecoderLayer, self).__init__()
         self.has_self_attn, self.siamese = self_attn, siamese
         self.debug = debug
         if self.has_self_attn:
-            self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+            self.self_attn = MultiheadAttention(
+                d_model,
+                nhead,
+                dropout=dropout,
+                attn_kind="self",
+                attention_impl=attention_impl,
+            )
             self.norm1 = LayerNorm(d_model)
             self.dropout1 = Dropout(dropout)
-        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            attn_kind="cross",
+            attention_impl=attention_impl,
+        )
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward)
         self.dropout = Dropout(dropout)
@@ -920,7 +973,13 @@ class TransformerDecoderLayer(Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
         if self.siamese:
-            self.multihead_attn2 = MultiheadAttention(d_model, nhead, dropout=dropout)
+            self.multihead_attn2 = MultiheadAttention(
+                d_model,
+                nhead,
+                dropout=dropout,
+                attn_kind="cross",
+                attention_impl=attention_impl,
+            )
 
         self.activation = _get_activation_fn(activation)
 

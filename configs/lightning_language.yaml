@@ -42,6 +42,8 @@ runtime:
   compile_mode: reduce-overhead
   compile_fullgraph: false
   compile_dynamic: false
+  fullgraph_train: false
+  fast_train_backend: auto
 
 wandb:
   enable: true

@@ -44,6 +44,14 @@ def _validate_training_config(config):
     _validate_checkpoint(vision_ckpt, "vision")
     _validate_checkpoint(language_ckpt, "language")
 
+    if getattr(config, "runtime_fullgraph_train", False):
+        if getattr(config, "global_debug", False):
+            raise ValueError("runtime.fullgraph_train=true requires global.debug=false")
+        if getattr(config, "export", False):
+            raise ValueError("runtime.fullgraph_train=true requires export=false")
+        if getattr(config, "model_language_use_self_attn", False):
+            raise ValueError("runtime.fullgraph_train=true requires model.language.use_self_attn=false")
+
     if stage == "train-super" and getattr(config, "training_require_pretrained", False):
         missing = []
         if vision_ckpt is None:
@@ -69,10 +77,12 @@ def _log_training_summary(config):
         getattr(config, "dataset_rotate_direction", "ccw"),
     )
     logging.info(
-        "Checkpoint summary: vision=%s language=%s require_pretrained=%s",
+        "Checkpoint summary: vision=%s language=%s require_pretrained=%s fullgraph_train=%s fast_train_backend=%s",
         getattr(config, "model_vision_checkpoint", None),
         getattr(config, "model_language_checkpoint", None),
         getattr(config, "training_require_pretrained", False),
+        getattr(config, "runtime_fullgraph_train", False),
+        getattr(config, "runtime_fast_train_backend", "auto"),
     )
 
 
@@ -130,6 +140,21 @@ def _apply_legacy_section_overrides(base_config, section_name, section_cfg):
     _apply(section_dict, section_name)
 
 
+def _apply_fullgraph_runtime_defaults(base_config):
+    if not getattr(base_config, "runtime_fullgraph_train", False):
+        return
+
+    base_config.export = False
+    base_config.global_debug = False
+
+    fast_backend = getattr(base_config, "runtime_fast_train_backend", "auto")
+    if fast_backend not in {"auto", "flash_only", "math_only"}:
+        raise ValueError(
+            "runtime.fast_train_backend must be one of: auto, flash_only, math_only"
+        )
+    base_config.runtime_attention_backend = fast_backend
+
+
 @hydra.main(config_path="configs", config_name="lightning.yaml", version_base=None)
 def main(cfg):
     # Hydraはデフォルトで作業ディレクトリを移動するので元に戻す
@@ -140,6 +165,7 @@ def main(cfg):
     apply_runtime_overrides(base_config, getattr(cfg, "runtime", None))
     for section_name in ("global", "dataset", "training", "optimizer", "model", "augmentation"):
         _apply_legacy_section_overrides(base_config, section_name, getattr(cfg, section_name, None))
+    _apply_fullgraph_runtime_defaults(base_config)
 
     # Hydra側からepochを上書き可能に
     if cfg.trainer.max_epochs is not None:

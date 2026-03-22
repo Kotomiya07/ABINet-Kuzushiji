@@ -13,6 +13,9 @@ class ResTranformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.resnet = resnet45()
+        attention_impl = "runtime"
+        if getattr(config, "runtime_fullgraph_train", False):
+            attention_impl = "sdpa"
 
         self.d_model = ifnone(config.model_vision_d_model, _default_tfmer_cfg['d_model'])
         nhead = ifnone(config.model_vision_nhead, _default_tfmer_cfg['nhead'])
@@ -24,7 +27,8 @@ class ResTranformer(nn.Module):
 
         self.pos_encoder = PositionalEncoding(self.d_model, max_len=max_len)
         encoder_layer = TransformerEncoderLayer(d_model=self.d_model, nhead=nhead, 
-                dim_feedforward=d_inner, dropout=dropout, activation=activation)
+                dim_feedforward=d_inner, dropout=dropout, activation=activation,
+                attention_impl=attention_impl)
         self.transformer = TransformerEncoder(encoder_layer, num_layers)
 
     def forward(self, images):

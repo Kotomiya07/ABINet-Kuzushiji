@@ -8,11 +8,11 @@ global:
 dataset:
   train: {
     roots: ['data/japanese_classical_column_lmdb/train'],
-    batch_size: 16
+    batch_size: 32
   }
   test: {
     roots: ['data/japanese_classical_column_lmdb/val'],
-    batch_size: 16
+    batch_size: 32
   }
   charset_path: data/japanese_classical_column_lmdb/charset_japanese_classical_column.txt
   num_workers: 8
@@ -46,7 +46,7 @@ optimizer:
   wd: 0.0
   bn_wd: False
   clip_grad: 20
-  lr: 0.0001
+  lr: 0.001
   args: {
     betas: !!python/tuple [0.9, 0.999],
   }

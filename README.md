@@ -37,9 +37,11 @@ ABINet uses a vision model and an explicit language model to recognize text in t
   - `wandb.mode` は `online` / `offline` / `disabled` を選択可。W&B を使わない場合は `wandb.enable=false`。
 - 学習と検証は Lightning の `Trainer` に統一されています。チェックポイントは `abinet-{epoch:02d}-{val_cwr:.4f}.ckpt` で保存されます。
 - Lightning 実行では `torch.compile` が既定で有効です。無効化する場合は `runtime.compile_enabled=false`。
+- 学習専用の高速パスを使う場合は `runtime.fullgraph_train=true` を指定します。この場合は fullgraph compile が有効になり、attention 実装も学習用に固定化されます。
 - Transformer 内の multi-head attention は PyTorch 2.x の SDPA を使用します。`runtime.attention_backend` で `auto` / `flash_only` / `math_only` を選べます。
 - FlashAttention カーネルを優先したい場合は mixed precision が必要です。例えば `trainer.precision=bf16-mixed` を指定してください。
 - decoder 側で `attn_mask` を使う経路では FlashAttention カーネルが使えない場合があります。そのため通常は `flash_only` ではなく `auto` の使用を推奨します。
+- `runtime.fullgraph_train=true` と併用する backend 指定は `runtime.fast_train_backend=auto|flash_only|math_only` を使用してください。通常は `auto` を推奨します。
 
 ### 実行例（くずし字 Kuzushiji）
 
@@ -139,11 +141,29 @@ datasets
    ```
    uv run python train_lightning.py \
      --config-name lightning_vision \
-     config_path=configs/pretrain_vision_japanese_classical.yaml \
+     config_path=configs/pretrain_vision_japanese_classical_128x640.yaml \
      trainer.max_epochs=10 \
+     trainer.val_check_interval=1000 \
+     trainer.precision=bf16-mixed \
+     runtime.fullgraph_train=true \
+     runtime.fast_train_backend=auto \
+     runtime.compile_enabled=true \
      wandb.enable=false
    ```
-   古典籍向け既定値では、縦長列画像をデータ読み込み時に反時計回り 90 度回転し、左揃えの letterbox で比率保持リサイズを使います。
+   古典籍向け `128x640` 既定値では、縦長列画像をデータ読み込み時に反時計回り 90 度回転し、左揃えの letterbox で比率保持リサイズを使います。
+   `flash_only` を試す場合:
+   ```
+   uv run python train_lightning.py \
+     --config-name lightning_vision \
+     config_path=configs/pretrain_vision_japanese_classical_128x640.yaml \
+     trainer.max_epochs=10 \
+     trainer.val_check_interval=1000 \
+     trainer.precision=bf16-mixed \
+     runtime.fullgraph_train=true \
+     runtime.fast_train_backend=flash_only \
+     runtime.compile_enabled=true \
+     wandb.enable=false
+   ```
    `64x256` の比較用設定:
    ```
    uv run python train_lightning.py \
@@ -167,14 +187,24 @@ datasets
      --config-name lightning_language \
      config_path=configs/pretrain_language_model_japanese_classical.yaml \
      trainer.max_epochs=40 \
+     trainer.val_check_interval=1000 \
+     trainer.precision=bf16-mixed \
+     runtime.fullgraph_train=true \
+     runtime.fast_train_backend=auto \
+     runtime.compile_enabled=true \
      wandb.enable=false
    ```
 5. ABINet 本学習  
    ```
    uv run python train_lightning.py \
      --config-name lightning \
-     config_path=configs/train_abinet_japanese_classical.yaml \
+     config_path=configs/train_abinet_japanese_classical_128x640.yaml \
      trainer.max_epochs=10 \
+     trainer.val_check_interval=1000 \
+     trainer.precision=bf16-mixed \
+     runtime.fullgraph_train=true \
+     runtime.fast_train_backend=auto \
+     runtime.compile_enabled=true \
      model.vision.checkpoint=/path/to/pretrain_vision.ckpt \
      model.language.checkpoint=/path/to/pretrain_language.ckpt \
      wandb.enable=false
